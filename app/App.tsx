@@ -9,7 +9,6 @@ import {
   DeviceEventEmitter,
   TextInput,
 } from 'react-native';
-
 import {
   Colors,
   DebugInstructions,
@@ -57,6 +56,7 @@ import {
   formatMrz,
   splitToWords
 } from '../common/src/utils/utils';
+import {CameraOptions, launchCamera} from 'react-native-image-picker';
 
 console.log('DEFAULT_PNUMBER', DEFAULT_PNUMBER);
 console.log('LOCAL_IP', LOCAL_IP);
@@ -553,6 +553,20 @@ function App(): JSX.Element {
             </Button>
             {proofResult && <Text>{proofResult}</Text>}
             {error && <Text>{error}</Text>}
+
+            <Button
+              onPress={async () => {
+                
+                const options = {
+                  mediaType: "photo",
+                }
+                const result = await launchCamera(options as CameraOptions);
+                console.log('result', result)
+              }}
+              marginTop={10}
+            >
+              <ButtonText>Take picture</ButtonText>
+            </Button>
 
           </View>
         </ScrollView>

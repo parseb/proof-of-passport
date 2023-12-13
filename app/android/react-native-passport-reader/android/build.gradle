@@ -4,7 +4,6 @@ apply plugin: 'kotlin-android'
 android {
     compileSdkVersion 33
     buildToolsVersion "25.0.1"
-
     defaultConfig {
         minSdkVersion 16
         targetSdkVersion 22
@@ -15,9 +14,6 @@ android {
     packagingOptions {
         exclude 'META-INF/LICENSE'
         exclude 'META-INF/NOTICE'
-    }
-    dexOptions {
-        javaMaxHeapSize "4g"
     }
     buildTypes {
         release {
