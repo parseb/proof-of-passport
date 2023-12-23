@@ -58,11 +58,17 @@ import {
   splitToWords
 } from '../common/src/utils/utils';
 import NfcManager, {NfcTech} from 'react-native-nfc-manager';
+import Crypto from 'react-native-quick-crypto';
 
 NfcManager.start();
 
 console.log('DEFAULT_PNUMBER', DEFAULT_PNUMBER);
 console.log('LOCAL_IP', LOCAL_IP);
+
+const hashed = Crypto.createHash('sha256')
+  .update('Damn, Margelo writes hella good software!')
+  .digest('hex');
+console.log('hashed', hashed)
 
 const CACHE_DATA_IN_LOCAL_SERVER = false;
 const SKIP_SCAN = false;
