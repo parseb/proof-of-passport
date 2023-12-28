@@ -113,6 +113,7 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation project(':react-native-passport-reader')
     // implementation files('libs/jmrtd-0.5.5.jar')
+    implementation project(':react-native-fs')
 
 
     debugImplementation("com.facebook.flipper:flipper:${FLIPPER_VERSION}")

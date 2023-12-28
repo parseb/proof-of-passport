@@ -9,6 +9,7 @@ import {
   DeviceEventEmitter,
   TextInput,
 } from 'react-native';
+import RNFS from "react-native-fs";
 
 import {
   Colors,
@@ -49,6 +50,7 @@ import {
 import {DataHash, PassportData} from './types/passportData';
 import {arraysAreEqual, bytesToBigDecimal, dataHashesObjToArray, formatAndConcatenateDataHashes, formatDuration, formatMrz, formatProof, splitToWords} from './utils/utils';
 import {hash, toUnsignedByte} from './utils/computeEContent';
+const rapidsnark = NativeModules.Rapidsnark;
 
 console.log('DEFAULT_PNUMBER', DEFAULT_PNUMBER);
 console.log('LOCAL_IP', LOCAL_IP);
@@ -73,7 +75,7 @@ function App(): JSX.Element {
   const [dateOfExpiry, setDateOfExpiry] = useState(DEFAULT_DOE ?? '');
   const [address, setAddress] = useState(DEFAULT_ADDRESS ?? '');
   const [passportData, setPassportData] = useState<PassportData | null>(null);
-  const [step, setStep] = useState('enterDetails');
+  const [step, setStep] = useState('scanCompleted');
   const [testResult, setTestResult] = useState<any>(null);
   const [error, setError] = useState<any>(null);
 
@@ -210,92 +212,104 @@ function App(): JSX.Element {
   }
 
   const handleProve = async () => {
-    if (passportData === null) {
-      console.log('passport data is null');
-      return;
-    }
 
     setGeneratingProof(true)
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    // 1. TODO check signature to make sure the proof will work
-
-    // 2. Format all the data as inputs for the circuit
-    const formattedMrz = formatMrz(passportData.mrz);
-    const mrzHash = hash(formatMrz(passportData.mrz));
-    const concatenatedDataHashes = formatAndConcatenateDataHashes(
-      mrzHash,
-      passportData.dataGroupHashes as DataHash[],
-    );
+    async function readAssetFileInChunks(filename: string, chunkSize: number) {
+      let currentPosition = 0;
+      let accumulatedData = '';
+      let fileInfo = await RNFS.stat(RNFS.DocumentDirectoryPath + '/' + filename);
+      let fileSize = fileInfo.size;
     
-    
-    const reveal_bitmap = Array.from({ length: 88 }, (_) => '0');
-
-    for(const attribute in disclosure) {
-      if (disclosure[attribute as keyof typeof disclosure]) {
-        const [start, end] = attributeToPosition[attribute as keyof typeof attributeToPosition];
-        for(let i = start; i <= end; i++) {
-          reveal_bitmap[i] = '1';
-        }
+      while (currentPosition < fileSize) {
+        const chunk = await RNFS.read(RNFS.DocumentDirectoryPath + '/' + filename, chunkSize, currentPosition, 'base64');
+        accumulatedData += chunk;
+        currentPosition += chunkSize; // Increment by chunkSize instead of chunk.length due to base64 encoding
       }
+    
+      return accumulatedData;
     }
-
-    if (passportData.signatureAlgorithm !== "SHA256withRSA") {
-      console.log(`${passportData.signatureAlgorithm} not supported for proof right now.`);
-      setError(`${passportData.signatureAlgorithm} not supported for proof right now.`);
-      return;
-    }
-
-    const inputs = {
-      mrz: Array.from(formattedMrz).map(byte => String(byte)),
-      reveal_bitmap: reveal_bitmap.map(byte => String(byte)),
-      dataHashes: Array.from(concatenatedDataHashes.map(toUnsignedByte)).map(byte => String(byte)),
-      eContentBytes: Array.from(passportData.eContent.map(toUnsignedByte)).map(byte => String(byte)),
-      signature: splitToWords(
-        BigInt(bytesToBigDecimal(passportData.encryptedDigest)),
-        BigInt(64),
-        BigInt(32)
-      ),
-      pubkey: splitToWords(
-        BigInt(passportData.pubKey.modulus as string),
-        BigInt(64),
-        BigInt(32)
-      ),
-      address,
-    }
-
+    
     // 3. Generate a proof of passport
-    const start = Date.now();
-    NativeModules.RNPassportReader.provePassport(inputs, (err: any, res: any) => {
+    try {
+
+
+      // This code assumes RNFS.copyFileAssets is available and works as expected
+      const assetFilename = 'circuit_final.zkey';
+      const destinationPath = RNFS.DocumentDirectoryPath + '/' + assetFilename;
+
+      try {
+        await RNFS.copyFileAssets(assetFilename, destinationPath);
+        console.log('File copied to: ' + destinationPath);
+        // Now you can read from destinationPath as a regular file
+      } catch (error) {
+        console.error('Failed to copy file from assets', error);
+      }
+
+      // const a = await RNFS.readDirAssets("");
+      // console.log('a', a)
+      console.log('RNFS.DocumentDirectoryPath', RNFS.DocumentDirectoryPath)
+      const start = Date.now();
+      
+      const zkey = await readAssetFileInChunks('circuit_final.zkey', 10 * 1024 * 1024); // 1MB chunk size
+      // const zkey = await RNFS.readFileAssets('circuit_final.zkey', 'base64');
+      console.log('zkey read')
+      
+      const wtns = await RNFS.readFileAssets('witness.wtns', 'base64');
+      console.log('wtns read')
+      
+      const middle = Date.now();
+      console.log('time to read files', middle - start)
+
+      const {proof, pub_signals} = await rapidsnark.groth16_prover(zkey, wtns);
+      console.log('proof', proof);
+      console.log('pub_signals', pub_signals);
+
       const end = Date.now();
+      console.log('time to generate proof', end - middle)
+      console.log('total time', end - start)
+
       setGeneratingProof(false)
       setStep('proofGenerated');
 
-      if (err) {
-        console.error(err);
-        setError(
-          "err: " + err.toString(),
-        );
-        return
-      }
-      console.log("res", res);
-      const parsedResponse = JSON.parse(res);
-      console.log('parsedResponse', parsedResponse);
-      console.log('parsedResponse.duration', parsedResponse.duration);
-
-      const deserializedProof = JSON.parse(parsedResponse.serialized_proof);
-      console.log('deserializedProof', deserializedProof);
-      
-      const proofFormattedForSolidity = formatProof(deserializedProof);
-      console.log('proofFormattedForSolidity', proofFormattedForSolidity);
-
-      setProofTime(parsedResponse.duration);
       setTotalTime(end - start);
+    } catch(err) {
+      console.error(err);
+      return
+    }
 
-      setProofResult(JSON.stringify(proofFormattedForSolidity));
 
-      // les outputs publics vont être postés on-chain comment ?
-    });
+    // NativeModules.RNPassportReader.provePassport(inputs, (err: any, res: any) => {
+    //   const end = Date.now();
+    //   setGeneratingProof(false)
+    //   setStep('proofGenerated');
+
+    //   if (err) {
+    //     console.error(err);
+    //     setError(
+    //       "err: " + err.toString(),
+    //     );
+    //     return
+    //   }
+    //   console.log("res", res);
+    //   const parsedResponse = JSON.parse(res);
+    //   console.log('parsedResponse', parsedResponse);
+    //   console.log('parsedResponse.duration', parsedResponse.duration);
+
+    //   const deserializedProof = JSON.parse(parsedResponse.serialized_proof);
+    //   console.log('deserializedProof', deserializedProof);
+      
+    //   const proofFormattedForSolidity = formatProof(deserializedProof);
+    //   console.log('proofFormattedForSolidity', proofFormattedForSolidity);
+
+    //   setProofTime(parsedResponse.duration);
+    //   setTotalTime(end - start);
+
+    //   setProofResult(JSON.stringify(proofFormattedForSolidity));
+
+    //   // les outputs publics vont être postés on-chain comment ?
+    // });
   };
 
   const handleMint = () => {
@@ -400,10 +414,10 @@ function App(): JSX.Element {
                 />
               </View>
             ) : null}
-            {step === 'scanCompleted' && passportData ? (
+            {step === 'scanCompleted' ? (
               <View style={styles.sectionContainer}>
                 <Text style={styles.header}>
-                  Hi {getFirstName(passportData.mrz)}
+                  Hi 
                 </Text>
                 <View
                   marginTop={20}
@@ -412,46 +426,13 @@ function App(): JSX.Element {
                   <Text
                     marginBottom={5}
                   >
-                    Signature algorithm: {passportData.signatureAlgorithm}
+                    Signature algorithm: 
                   </Text>
                   <Text
                     marginBottom={10}
                   >
                     What do you want to disclose ?
                   </Text>
-                  {Object.keys(disclosure).map((key) => {
-                    const keyy = key as keyof typeof disclosure;
-                    const indexes = attributeToPosition[keyy];
-                    const keyFormatted = keyy.replace(/_/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                    const mrzAttribute = passportData.mrz.slice(indexes[0], indexes[1])
-                    const mrzAttributeFormatted = mrzAttribute.replace(/</g, ' ')
-                    
-                    return (
-                      <View key={key} margin={2} width={"$full"} flexDirection="row" justifyContent="space-between">
-                        <View maxWidth={"$5/6"}>
-                          <Text
-                            style={{fontWeight: "bold"}}
-                          >
-                            {keyFormatted}:{" "}
-                          </Text>
-                          <Text>
-                            {mrzAttributeFormatted}
-                          </Text>
-                        </View>
-                        <Checkbox
-                          value={key}
-                          isChecked={disclosure[keyy]}
-                          onChange={() => handleDisclosureChange(keyy)}
-                          size="lg"
-                          aria-label={key}
-                        >
-                          <CheckboxIndicator mr="$2">
-                            <CheckboxIcon as={CheckIcon} />
-                          </CheckboxIndicator>
-                        </Checkbox>
-                      </View>
-                    )
-                  })}
                 </View>
                 <Text>Enter your address or ens</Text>
                 <Input

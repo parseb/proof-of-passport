@@ -2,7 +2,7 @@ import { describe } from 'mocha'
 import chai, { assert, expect } from 'chai'
 import chaiAsPromised from 'chai-as-promised'
 import { arraysAreEqual, bytesToBigDecimal, formatAndConcatenateDataHashes, formatMrz, splitToWords } from '../utils/utils'
-import { groth16 } from 'snarkjs'
+import { groth16, wtns } from 'snarkjs'
 import { hash, toUnsignedByte } from '../utils/computeEContent'
 import { DataHash, PassportData } from '../utils/types'
 import { genSampleData } from '../utils/sampleData'
@@ -67,6 +67,11 @@ describe('Circuit tests', function () {
   it('should prove and verify with valid inputs', async function () {
     console.log('inputs', inputs)
 
+    // console.log('wtns', wtns.calculate)
+    const witness = await wtns.calculate(inputs, "build/passport_js/passport.wasm", "build/passport.wtns")
+    // groth16.calculateWitness(
+    console.log('witness', witness)
+
     const { proof, publicSignals } = await groth16.fullProve(
       inputs,
       "build/passport_js/passport.wasm",
@@ -129,7 +134,7 @@ describe('Circuit tests', function () {
     )).to.be.rejected;
   })
 
-  it.only('should support selective disclosure', async function () {
+  it('should support selective disclosure', async function () {
     const attributeToPosition = {
       issuing_state: [2, 5],
       name: [5, 44],
